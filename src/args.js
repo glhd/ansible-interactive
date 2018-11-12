@@ -20,6 +20,10 @@ const args = require('yargs')
 		default: false,
 		boolean: true,
 	})
+	.option('no-history', {
+		default: false,
+		boolean: true,
+	})
 	.argv;
 
 module.exports = args;

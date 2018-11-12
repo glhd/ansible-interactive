@@ -56,6 +56,7 @@ async function selectTags(tags) {
 		name: 'tags',
 		message: 'Which tags would you like to run?',
 		choices: tags,
+		validate: tags => tags.length ? true : 'Please select at least one tag!',
 	});
 	
 	return response.tags;

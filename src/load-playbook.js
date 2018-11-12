@@ -64,8 +64,10 @@ async function selectPlaybook(files) {
 	return file;
 }
 
-module.exports = async function() {
-	const files = await glob('*.+(yml|yaml)');
+module.exports = async function(file) {
+	const files = file
+		? [file]
+		: await glob('*.+(yml|yaml)');
 	const file_data = await readPlaybooks(files);
 	const playbooks = await parsePlaybooks(file_data);
 	

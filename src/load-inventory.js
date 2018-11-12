@@ -71,8 +71,10 @@ async function selectFile(files) {
 	return file;
 }
 
-module.exports = async function() {
-	const files = await glob('*');
+module.exports = async function(file) {
+	const files = file
+		? [file]
+		: await glob('*');
 	const stats = await loadFileStats(files);
 	const possibleInventories = filterFiles(stats);
 	const inventoryContents = await readFiles(possibleInventories);
