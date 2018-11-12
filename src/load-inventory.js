@@ -31,9 +31,14 @@ function readFiles(files) {
 
 function parseFiles(files) {
 	return files.map(file => ({
-		filename: file.filename,
-		ini: file.err ? false : ini.decode(file.data),
-	})).filter(file => file.ini);
+			filename: file.filename,
+			ini: file.err ? false : ini.decode(file.data),
+		}))
+		.filter(file => file.ini)
+		.map(file => ({
+			...file,
+			groups: Object.keys(file.ini).map(group => group.replace(/:children$/, '')),
+		}));
 }
 
 async function selectFile(files) {
