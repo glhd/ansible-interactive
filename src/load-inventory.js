@@ -39,13 +39,14 @@ function parseFiles(files) {
 async function selectFile(files) {
 	if (1 === files.length) {
 		const file = files[0];
-		const confirmed = await prompt({
+		const response = await prompt({
 			type: 'confirm',
-			message: `Run using "${file.filename}"?`,
+			name: 'confirmed',
+			message: `Use "${file.filename}" inventory file?`,
 			initial: true,
 		});
 		
-		if (confirmed) {
+		if (response.confirmed) {
 			return file;
 		}
 		
