@@ -1,6 +1,6 @@
 'use strict';
 
-module.exports = function(groups, inventory, playbook, tags, mode) {
+module.exports = function({ inventory, groups, playbook, tags, mode }) {
 	const command = ['ansible-playbook'];
 	
 	// Add inventory file

@@ -15,13 +15,13 @@ module.exports = async function() {
 	const tags = await loadTags();
 	const mode = await loadMode();
 	
-	const command = buildCommand(
-		groups,
+	const command = buildCommand({
 		inventory,
+		groups,
 		playbook,
 		tags,
-		mode
-	);
+		mode,
+	});
 	
 	console.log('');
 	console.log(command);
