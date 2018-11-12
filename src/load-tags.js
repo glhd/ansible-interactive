@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const yaml = require("js-yaml");
+const { prompt } = require('enquirer');
 const glob = require('./glob-promise');
 
 async function readTasks(files) {
@@ -38,11 +39,42 @@ function extractTags(all_tasks) {
 		.sort();
 }
 
-module.exports = async function() {
-	const files = await glob('./**/tasks/*.yml');
-	const data = await readTasks(files);
-	const tasks = await parseTasks(data);
-	const tags = extractTags(tasks);
+async function limitTags() {
+	const response = await prompt({
+		type: 'confirm',
+		name: 'limit_tags',
+		message: `Would you like to choose specific tags to provision?`,
+		initial: true,
+	});
 	
-	return tags;
+	return response.limit_tags;
+}
+
+async function selectTags(tags) {
+	const response = await prompt({
+		type: 'multiselect',
+		name: 'tags',
+		message: 'Which tags would you like to run?',
+		choices: tags,
+	});
+	
+	return response.tags;
+}
+
+module.exports = async function() {
+	const limit_tags = await limitTags();
+	
+	let tags = [];
+	if (limit_tags) {
+		const files = await glob('./**/tasks/*.yml');
+		const data = await readTasks(files);
+		const tasks = await parseTasks(data);
+		const all_tags = extractTags(tasks);
+		tags = await selectTags(all_tags);
+	}
+	
+	return {
+		limit_tags,
+		tags,
+	};
 };
