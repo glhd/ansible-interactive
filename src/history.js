@@ -17,10 +17,10 @@ async function loadHistory() {
 		
 		const history_file = historyFile();
 		fs.readFile(history_file, 'utf8', (err, data) => {
-			history = JSON.parse(data);
-			return err
-				? resolve([])
-				: resolve(history);
+			history = err
+				? []
+				: JSON.parse(data);
+			resolve(history);
 		});
 	});
 }

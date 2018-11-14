@@ -12,7 +12,7 @@ module.exports = async function() {
 	}
 	
 	const last_command = history[0].filter(arg => '--check' !== arg);
-	const last_command_string = last_command.join(' ');
+	const last_command_string = last_command.join(' ').replace(' --diff', '');
 	
 	const run_new = 'Run a new command';
 	const rerun_check = 'Re-run last command in check mode';
