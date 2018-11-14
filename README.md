@@ -1,2 +1,3 @@
 # ansible-interactive
-Interactive CLI for ansible plays
+
+[![asciicast](https://asciinema.org/a/W6PagCnByjxkrkV5VJNe9uffA.svg)](https://asciinema.org/a/W6PagCnByjxkrkV5VJNe9uffA)
