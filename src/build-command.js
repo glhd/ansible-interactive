@@ -30,5 +30,5 @@ module.exports = function({ inventory, groups, playbook, tags, mode }) {
 	command.push(playbook.filename);
 	
 	// Build final command string
-	return command.join(' ');
+	return command;
 };
