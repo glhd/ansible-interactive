@@ -39,14 +39,42 @@ async function execute(command) {
 			env: process.env,
 			encoding: "utf8",
 			shell: true,
+			detached: false,
 			stdio: "inherit"
 		};
 		
 		const binary = command.shift();
 		const proc = spawn(binary, command, opts);
+
+		const interrupt = () => proc.kill('SIGINT');
+		const terminate = () => proc.kill('SIGTERM');
+
+		process.on('SIGINT', interrupt);
+		process.on('SIGTERM', terminate);
+
+		const cleanup = () => {
+			process.off('SIGINT', interrupt);
+			process.off('SIGTERM', terminate);
+		};
 		
-		proc.on('exit', resolve);
-		proc.on('error', reject);
+		proc.on('exit', (code) => {
+			cleanup();
+
+			if (0 === code) {
+				resolve(code);
+			} else {
+				reject(`Ansible exited with code ${code}`);
+			}
+		});
+
+		proc.on('error', (err) => {
+			if (proc.connected) {
+				proc.kill();
+			}
+
+			cleanup();
+			reject(err);
+		});
 	});
 }
 
@@ -56,12 +84,8 @@ module.exports = async function(command) {
 	await confirm(command_line);
 	await saveHistory(command);
 	
-	try {
-		await execute(command);
-		console.log('');
-		process.exit(0);
-	} catch (e) {
-		console.log('');
-		process.exit(1);
-	}
+	await execute(command);
+
+	console.log('');
+	process.exit(0);
 };

@@ -17,6 +17,7 @@ module.exports = async function() {
 		const replay_command = await replay();
 		if (replay_command) {
 			await runCommand(replay_command); // FIXME
+			return;
 		}
 		
 		const inventory = await loadInventory(args.inventory);

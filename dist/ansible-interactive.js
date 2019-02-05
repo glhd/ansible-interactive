@@ -24463,14 +24463,42 @@ async function execute(command) {
 			env: process$1.env,
 			encoding: "utf8",
 			shell: true,
+			detached: false,
 			stdio: "inherit"
 		};
 		
 		const binary = command.shift();
 		const proc = spawn$1(binary, command, opts);
+
+		const interrupt = () => proc.kill('SIGINT');
+		const terminate = () => proc.kill('SIGTERM');
+
+		process$1.on('SIGINT', interrupt);
+		process$1.on('SIGTERM', terminate);
+
+		const cleanup = () => {
+			process$1.off('SIGINT', interrupt);
+			process$1.off('SIGTERM', terminate);
+		};
 		
-		proc.on('exit', resolve);
-		proc.on('error', reject);
+		proc.on('exit', (code) => {
+			cleanup();
+
+			if (0 === code) {
+				resolve(code);
+			} else {
+				reject(`Ansible exited with code ${code}`);
+			}
+		});
+
+		proc.on('error', (err) => {
+			if (proc.connected) {
+				proc.kill();
+			}
+
+			cleanup();
+			reject(err);
+		});
 	});
 }
 
@@ -24480,14 +24508,10 @@ var runCommand = async function(command) {
 	await confirm$1(command_line);
 	await saveHistory$1(command);
 	
-	try {
-		await execute(command);
-		console.log('');
-		process$1.exit(0);
-	} catch (e) {
-		console.log('');
-		process$1.exit(1);
-	}
+	await execute(command);
+
+	console.log('');
+	process$1.exit(0);
 };
 
 var ansibleInteractive = async function() {
@@ -24495,6 +24519,7 @@ var ansibleInteractive = async function() {
 		const replay_command = await replay();
 		if (replay_command) {
 			await runCommand(replay_command); // FIXME
+			return;
 		}
 		
 		const inventory = await loadInventory(args_1.inventory);

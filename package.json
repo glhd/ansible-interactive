@@ -21,6 +21,7 @@
     "make-dist-dirs": "mkdir -p dist/js && mkdir -p dist/bin",
     "dist-js": "echo '#!/usr/bin/env node' | cat - dist/ansible-interactive.js > dist/js/ansible-interactive && chmod +x dist/js/ansible-interactive",
     "dist-bin": "nexe -i dist/ansible-interactive.js -o dist/bin/ansible-interactive",
+    "dist-bin-fresh": "nexe --build -i dist/ansible-interactive.js -o dist/bin/ansible-interactive",
     "dist": "yarn run clean-dist && yarn run make-dist-dirs && yarn run build && yarn run dist-js"
   }
 }
