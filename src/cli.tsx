@@ -1,13 +1,22 @@
 #!/usr/bin/env node
-import {readFileSync} from 'node:fs';
 import {parseArgs} from 'node:util';
 import {render} from 'ink';
 import {App} from './app.js';
+import {VERSION} from './lib/build-info.js';
 import {saveHistory} from './lib/history.js';
 import {runAttached} from './lib/run.js';
+import {
+	autoUpdateEnabled,
+	checkForUpdate,
+	compareVersions,
+	fetchLatestVersion,
+	formatUpdateNotice,
+	selfUpdate,
+} from './lib/update.js';
 
 const HELP = `
 Usage: ansible-interactive [options] [-- ansible-playbook args]
+       ansible-interactive update [version]
 
 Build and run an ansible-playbook command by answering a few questions.
 
@@ -22,18 +31,60 @@ Options
 
 Anything after "--" is passed to ansible-playbook as-is, for example:
   ansible-interactive -- --ask-become-pass -e env=staging
+
+Updates
+  ansible-interactive checks GitHub for a new release once a day and tells
+  you when one is out. "ansible-interactive update" installs it.
+  ANSIBLE_INTERACTIVE_AUTO_UPDATE=1          install updates after each run
+  ANSIBLE_INTERACTIVE_DISABLE_UPDATE_CHECK=1 never check for updates
 `;
 
-function version(): string {
-	const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
-		version: string;
-	};
-	return pkg.version;
+async function update(version?: string): Promise<number> {
+	const target = version ?? (await fetchLatestVersion());
+	if (version === undefined && compareVersions(target, VERSION) <= 0) {
+		console.log(`ansible-interactive is up to date (${VERSION}).`);
+		return 0;
+	}
+
+	await selfUpdate(target, message => console.log(message));
+	return 0;
+}
+
+/** Tell the user about a new release, or install it if they opted in. */
+async function afterRun(check: ReturnType<typeof checkForUpdate>): Promise<void> {
+	// Don't hold up the exit for a slow network
+	const available = await Promise.race([
+		check,
+		new Promise<undefined>(resolve => setTimeout(() => resolve(undefined), 1000).unref()),
+	]);
+	if (!available) {
+		return;
+	}
+
+	if (autoUpdateEnabled()) {
+		try {
+			await selfUpdate(available.latest, message => console.error(message));
+			return;
+		} catch (error) {
+			console.error(`Auto-update failed: ${error instanceof Error ? error.message : String(error)}`);
+		}
+	}
+
+	console.error(`\n\u001B[33m${formatUpdateNotice(available)}\u001B[39m`);
 }
 
 async function main(): Promise<number> {
-	// Everything after "--" belongs to ansible-playbook
 	const args = process.argv.slice(2);
+
+	if (args[0] === 'update') {
+		if (args.length > 2) {
+			throw new Error('Usage: ansible-interactive update [version]');
+		}
+
+		return update(args[1]);
+	}
+
+	// Everything after "--" belongs to ansible-playbook
 	const separator = args.indexOf('--');
 	const extra = separator === -1 ? [] : args.slice(separator + 1);
 
@@ -56,7 +107,7 @@ async function main(): Promise<number> {
 	}
 
 	if (values.version) {
-		console.log(version());
+		console.log(VERSION);
 		return 0;
 	}
 
@@ -71,6 +122,20 @@ async function main(): Promise<number> {
 		return 1;
 	}
 
+	const updateCheck = checkForUpdate();
+	const code = await interactive(values, extra, delay);
+	await afterRun(updateCheck);
+	return code;
+}
+
+type Values = {
+	inventory?: string[];
+	playbook?: string;
+	'no-history'?: boolean;
+	verbose?: boolean;
+};
+
+async function interactive(values: Values, extra: string[], delay: number): Promise<number> {
 	const history = !values['no-history'];
 	let command: string[] | undefined;
 
@@ -119,7 +184,8 @@ async function main(): Promise<number> {
 
 main().then(
 	code => {
-		process.exitCode = code;
+		// Exit now rather than wait on an unfinished update check
+		process.exit(code);
 	},
 	(error: unknown) => {
 		console.error(error instanceof Error ? error.message : error);

@@ -1,0 +1,83 @@
+name: Release
+
+# Push a version tag to publish a release:
+#   npm version 1.2.0 && git push --follow-tags
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            targets: linux-x64 linux-arm64 linux-x64-musl linux-arm64-musl
+            smoke: linux-x64
+          - os: macos-latest
+            targets: darwin-x64 darwin-arm64
+            smoke: darwin-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: npm ci
+
+      - name: Check tag matches package.json
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match package.json version $version" >&2
+            exit 1
+          fi
+
+      - run: npm test
+      - run: npm run build:binaries -- ${{ matrix.targets }}
+
+      # Apple Silicon refuses to run unsigned binaries. An ad-hoc signature is
+      # enough for copies fetched with curl, which carry no quarantine flag.
+      - name: Sign macOS binaries
+        if: runner.os == 'macOS'
+        run: |
+          for binary in build/ansible-interactive-darwin-*; do
+            codesign --force --sign - "$binary"
+          done
+
+      - name: Smoke test
+        run: test "$(./build/ansible-interactive-${{ matrix.smoke }} --version)" = "${GITHUB_REF_NAME#v}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ runner.os }}
+          path: build/
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: binaries-*
+          path: build/
+          merge-multiple: true
+      - run: sh scripts/package-release.sh
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prerelease=""
+          case "$GITHUB_REF_NAME" in *-*) prerelease="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" release/* --verify-tag --generate-notes $prerelease

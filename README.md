@@ -14,14 +14,48 @@ Live runs wait a few seconds so you can back out. Each command is saved to `.ans
 
 ## Requirements
 
-- Node.js 22 or newer
+- macOS or Linux (on Windows, use WSL: Ansible can't run on Windows directly)
 - Ansible (`ansible-core` 2.12 or newer) on your `PATH`. The tool uses `ansible-inventory`, `ansible-config` and `ansible-playbook --list-tags` to read your project, so it sees what Ansible sees.
 
 ## Install
 
 ```sh
+curl -fsSL https://github.com/glhd/ansible-interactive/releases/latest/download/install.sh | sh
+```
+
+This downloads the single-file binary for your platform, checks it against the release's `SHA256SUMS.txt`, and puts it in `~/.local/bin` (or `/usr/local/bin` as root). It doesn't need Node.js. Options:
+
+```sh
+# A specific version
+curl -fsSL https://github.com/glhd/ansible-interactive/releases/latest/download/install.sh | sh -s 1.2.0
+
+# Somewhere else
+curl -fsSL https://github.com/glhd/ansible-interactive/releases/latest/download/install.sh | INSTALL_DIR=/opt/bin sh
+```
+
+You can also download a binary from the [releases page](https://github.com/glhd/ansible-interactive/releases). Builds exist for macOS (Intel and Apple Silicon) and Linux (x64 and arm64, glibc and musl). On macOS, files downloaded with a browser get a quarantine flag; clear it with `xattr -d com.apple.quarantine ansible-interactive`.
+
+To install with npm instead (needs Node.js 22 or newer):
+
+```sh
 npm install --global github:glhd/ansible-interactive
 ```
+
+## Updates
+
+Once a day, `ansible-interactive` asks GitHub whether a new release is out. If one is, it says so after your run finishes. The check never delays or blocks a run.
+
+```sh
+ansible-interactive update         # install the latest release
+ansible-interactive update 1.2.0   # install a specific version
+```
+
+| Variable | Effect |
+| --- | --- |
+| `ANSIBLE_INTERACTIVE_AUTO_UPDATE=1` | Install new releases after each run, without asking |
+| `ANSIBLE_INTERACTIVE_DISABLE_UPDATE_CHECK=1` | Never check for updates (also off when `CI` is set) |
+
+Updates check the download against `SHA256SUMS.txt` before replacing the binary. npm installs can't update themselves; the notice tells you the npm command instead.
 
 ## Usage
 
@@ -61,7 +95,17 @@ ansible-interactive -- --ask-become-pass -e env=staging
 
 ```sh
 npm install
-npm run dev      # run from source
+npm run dev              # run from source
 npm test
-npm run build    # compile to dist/
+npm run build            # compile to dist/
+npm run build:binaries   # standalone binaries in build/ (needs Bun)
 ```
+
+## Releasing
+
+```sh
+npm version 1.2.0        # bumps package.json and tags v1.2.0
+git push --follow-tags
+```
+
+The tag starts the [release workflow](.github/workflows/release.yml). It runs the tests, builds the binaries with `bun build --compile` (macOS builds run on a macOS runner so they can be signed), and publishes a GitHub release with the binaries, `SHA256SUMS.txt` and `install.sh`. Tags with a hyphen, such as `v1.2.0-beta.1`, become pre-releases, which the installer and update check skip.

@@ -19,7 +19,9 @@
     "dev": "tsx src/cli.tsx",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "prepare": "npm run build"
+    "prepare": "npm run build",
+    "build:binaries": "bun scripts/build-binaries.ts",
+    "package:release": "sh scripts/package-release.sh"
   },
   "dependencies": {
     "ink": "^7.1.1",

@@ -21,3 +21,19 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+
+  binary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: npm ci
+      - run: shellcheck install.sh scripts/package-release.sh
+      - run: npm run build:binaries -- linux-x64
+      - run: ./build/ansible-interactive-linux-x64 --version
