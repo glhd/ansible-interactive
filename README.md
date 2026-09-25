@@ -103,12 +103,15 @@ npm run build:binaries   # standalone binaries in build/ (needs Bun)
 
 ## Releasing
 
+Publish a release on GitHub with a new tag such as `v1.2.0`, or `v1.2.0-beta.1` for a pre-release. Pushing the tag yourself works too:
+
 ```sh
-npm version 1.2.0        # bumps package.json and tags v1.2.0
-git push --follow-tags
+git tag v1.2.0 && git push origin v1.2.0
 ```
 
-The tag starts the [release workflow](.github/workflows/release.yml). It runs the tests, builds the binaries with `bun build --compile`, signs and notarizes the macOS binary, and publishes a GitHub release with the binaries, `SHA256SUMS.txt` and `install.sh`. Tags with a hyphen, such as `v1.2.0-beta.1`, become pre-releases, which the installer and update check skip.
+The tag starts the [release workflow](.github/workflows/release.yml). It builds with the tag's version, so you don't need to change `package.json` first. It runs the tests, builds the binaries with `bun build --compile`, signs and notarizes the macOS binary, and adds the binaries, `SHA256SUMS.txt` and `install.sh` to the release (creating it if you only pushed a tag). Finally it sets `package.json` on the default branch to the new version, unless that's already newer.
+
+Tags with a hyphen become pre-releases, which the installer and update check skip. To rebuild an existing tag, run the workflow by hand from the Actions tab and enter the tag.
 
 Signing the macOS binary needs these repository secrets:
 
