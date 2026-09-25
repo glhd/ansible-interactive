@@ -14,7 +14,7 @@ Live runs wait a few seconds so you can back out. Each command is saved to `.ans
 
 ## Requirements
 
-- macOS or Linux (on Windows, use WSL: Ansible can't run on Windows directly)
+- An Apple Silicon Mac or Linux (on Windows, use WSL: Ansible can't run on Windows directly). Intel Macs can use the npm install.
 - Ansible (`ansible-core` 2.12 or newer) on your `PATH`. The tool uses `ansible-inventory`, `ansible-config` and `ansible-playbook --list-tags` to read your project, so it sees what Ansible sees.
 
 ## Install
@@ -33,7 +33,7 @@ curl -fsSL https://github.com/glhd/ansible-interactive/releases/latest/download/
 curl -fsSL https://github.com/glhd/ansible-interactive/releases/latest/download/install.sh | INSTALL_DIR=/opt/bin sh
 ```
 
-You can also download a binary from the [releases page](https://github.com/glhd/ansible-interactive/releases). Builds exist for macOS (Intel and Apple Silicon) and Linux (x64 and arm64, glibc and musl). On macOS, files downloaded with a browser get a quarantine flag; clear it with `xattr -d com.apple.quarantine ansible-interactive`.
+You can also download a binary from the [releases page](https://github.com/glhd/ansible-interactive/releases). Builds exist for Apple Silicon Macs and Linux (x64 and arm64, glibc and musl). The macOS binary is signed and notarized by Apple. On an Intel Mac, install with npm instead.
 
 To install with npm instead (needs Node.js 22 or newer):
 
@@ -108,4 +108,17 @@ npm version 1.2.0        # bumps package.json and tags v1.2.0
 git push --follow-tags
 ```
 
-The tag starts the [release workflow](.github/workflows/release.yml). It runs the tests, builds the binaries with `bun build --compile` (macOS builds run on a macOS runner so they can be signed), and publishes a GitHub release with the binaries, `SHA256SUMS.txt` and `install.sh`. Tags with a hyphen, such as `v1.2.0-beta.1`, become pre-releases, which the installer and update check skip.
+The tag starts the [release workflow](.github/workflows/release.yml). It runs the tests, builds the binaries with `bun build --compile`, signs and notarizes the macOS binary, and publishes a GitHub release with the binaries, `SHA256SUMS.txt` and `install.sh`. Tags with a hyphen, such as `v1.2.0-beta.1`, become pre-releases, which the installer and update check skip.
+
+Signing the macOS binary needs these repository secrets:
+
+| Secret | Contents |
+| --- | --- |
+| `MACOS_CERTIFICATE_P12` | Developer ID Application certificate as a base64-encoded `.p12` |
+| `MACOS_CERTIFICATE_PASSWORD` | Password for the `.p12` |
+| `KEYCHAIN_PASSWORD` | Any password, for the temporary keychain on the runner |
+| `ASC_KEY_ID` | App Store Connect API key ID, for notarization |
+| `ASC_ISSUER_ID` | App Store Connect API issuer ID |
+| `ASC_PRIVATE_KEY` | Contents of the App Store Connect API `.p8` key |
+
+The release fails early if any of them is missing.

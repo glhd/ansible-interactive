@@ -12,7 +12,6 @@ export const TARGETS = [
 	'linux-arm64',
 	'linux-x64-musl',
 	'linux-arm64-musl',
-	'darwin-x64',
 	'darwin-arm64',
 ] as const;
 

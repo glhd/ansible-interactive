@@ -35,9 +35,13 @@ case "$(uname -m)" in
 	*) fail "Unsupported architecture: $(uname -m)" ;;
 esac
 
-# Rosetta reports x86_64 on Apple Silicon; prefer the native build
-if [ "$os" = "darwin" ] && [ "$arch" = "x64" ] && [ "$(sysctl -n sysctl.proc_translated 2>/dev/null || echo 0)" = "1" ]; then
-	arch="arm64"
+if [ "$os" = "darwin" ] && [ "$arch" = "x64" ]; then
+	# Rosetta reports x86_64 on Apple Silicon; use the native build
+	if [ "$(sysctl -n sysctl.proc_translated 2>/dev/null || echo 0)" = "1" ]; then
+		arch="arm64"
+	else
+		fail "Intel Macs aren't supported. Install with npm instead: npm install --global github:$REPO"
+	fi
 fi
 
 target="$os-$arch"
