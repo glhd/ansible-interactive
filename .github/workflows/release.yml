@@ -1,7 +1,11 @@
 name: Release
 
-# Push a version tag to publish a release:
-#   npm version 1.2.0 && git push --follow-tags
+# Runs when a v* tag is pushed, including tags created by publishing a release
+# on GitHub. The version comes from the tag: package.json doesn't need bumping
+# first. After publishing, package.json on the default branch is set to the
+# tag's version (unless it's already newer).
+#
+# To rebuild an existing tag, run this workflow by hand and enter the tag.
 #
 # The macOS binary is signed with a Developer ID certificate and notarized.
 # Required repository secrets (same names as inxilpro/security-groupie):
@@ -14,6 +18,14 @@ name: Release
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to build and publish, e.g. v1.2.0
+        required: true
+
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
 
 permissions:
   contents: read
@@ -31,8 +43,10 @@ jobs:
             smoke: darwin-arm64
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -41,13 +55,16 @@ jobs:
           bun-version: 1.4.2
       - run: npm ci
 
-      - name: Check tag matches package.json
+      # Build with the tag's version, whatever package.json says
+      - name: Set version from tag
         run: |
-          version="$(node -p "require('./package.json').version")"
-          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
-            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $version"
+          VERSION="${TAG#v}"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Tag '$TAG' is not a version like v1.2.0 or v1.2.0-beta.1"
             exit 1
           fi
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
       # Fail before building rather than publish an unsigned macOS binary
       - name: Check signing secrets
@@ -156,7 +173,7 @@ jobs:
           fi
 
       - name: Smoke test
-        run: test "$(./build/ansible-interactive-${{ matrix.smoke }} --version)" = "${GITHUB_REF_NAME#v}"
+        run: test "$(./build/ansible-interactive-${{ matrix.smoke }} --version)" = "$VERSION"
 
       - name: Remove temporary keychain and API key
         if: always() && runner.os == 'macOS'
@@ -165,7 +182,7 @@ jobs:
           security list-keychains -d user -s login.keychain-db
           rm -f "$RUNNER_TEMP"/AuthKey_*.p8 "$RUNNER_TEMP/notarize.zip"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: binaries-${{ runner.os }}
           path: build/
@@ -177,17 +194,50 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/download-artifact@v8
         with:
           pattern: binaries-*
           path: build/
           merge-multiple: true
       - run: sh scripts/package-release.sh
+
+      # A release made on GitHub already exists: keep its notes and add the files
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          prerelease=""
-          case "$GITHUB_REF_NAME" in *-*) prerelease="--prerelease" ;; esac
-          gh release create "$GITHUB_REF_NAME" release/* --verify-tag --generate-notes $prerelease
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" release/* --clobber
+          else
+            prerelease=""
+            case "$TAG" in *-*) prerelease="--prerelease" ;; esac
+            gh release create "$TAG" release/* --verify-tag --generate-notes $prerelease
+          fi
+
+  sync-version:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - run: node scripts/sync-version.mjs "$TAG"
+      - name: Commit and push
+        env:
+          BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "Set version to ${TAG#v}"
+          git push origin "HEAD:$BRANCH"
