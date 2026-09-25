@@ -1,6 +1,6 @@
 {
   "name": "ansible-interactive",
-  "version": "1.0.0",
+  "version": "2.0.0-beta.1",
   "description": "Interactive prompt for building and running ansible-playbook commands",
   "license": "MIT",
   "repository": "github:glhd/ansible-interactive",
