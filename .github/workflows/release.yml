@@ -1,0 +1,193 @@
+name: Release
+
+# Push a version tag to publish a release:
+#   npm version 1.2.0 && git push --follow-tags
+#
+# The macOS binary is signed with a Developer ID certificate and notarized.
+# Required repository secrets (same names as inxilpro/security-groupie):
+#   MACOS_CERTIFICATE_P12       base64-encoded Developer ID Application .p12
+#   MACOS_CERTIFICATE_PASSWORD  password protecting the .p12
+#   KEYCHAIN_PASSWORD           arbitrary password for the throwaway CI keychain
+#   ASC_KEY_ID                  App Store Connect API key ID (for notarytool)
+#   ASC_ISSUER_ID               App Store Connect API issuer ID
+#   ASC_PRIVATE_KEY             contents of the App Store Connect API .p8 key
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            targets: linux-x64 linux-arm64 linux-x64-musl linux-arm64-musl
+            smoke: linux-x64
+          - os: macos-latest
+            targets: darwin-arm64
+            smoke: darwin-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: npm ci
+
+      - name: Check tag matches package.json
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $version"
+            exit 1
+          fi
+
+      # Fail before building rather than publish an unsigned macOS binary
+      - name: Check signing secrets
+        if: runner.os == 'macOS'
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+        run: |
+          missing=""
+          for name in MACOS_CERTIFICATE_P12 MACOS_CERTIFICATE_PASSWORD KEYCHAIN_PASSWORD ASC_KEY_ID ASC_ISSUER_ID ASC_PRIVATE_KEY; do
+            [ -n "$(printenv "$name")" ] || missing="$missing $name"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secrets:$missing"
+            exit 1
+          fi
+
+      - run: npm test
+      - run: npm run build:binaries -- ${{ matrix.targets }}
+
+      - name: Import Developer ID certificate
+        if: runner.os == 'macOS'
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH="$RUNNER_TEMP/release.keychain-db"
+          CERT_PATH="$RUNNER_TEMP/certificate.p12"
+
+          echo -n "$MACOS_CERTIFICATE_P12" | base64 --decode > "$CERT_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          security import "$CERT_PATH" \
+            -k "$KEYCHAIN_PATH" \
+            -P "$MACOS_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign
+          # Allow codesign to use the key without a UI prompt
+          security set-key-partition-list \
+            -S apple-tool:,apple: \
+            -k "$KEYCHAIN_PASSWORD" \
+            "$KEYCHAIN_PATH" > /dev/null
+
+          security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain-db
+          rm "$CERT_PATH"
+
+          # Fail fast if the identity is unusable
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH" | grep "Developer ID Application"
+
+      # Hardened runtime is required for notarization; the entitlements let
+      # Bun's JavaScript engine use its JIT under it
+      - name: Sign macOS binary
+        if: runner.os == 'macOS'
+        run: |
+          codesign --force --timestamp --options runtime \
+            --entitlements packaging/macos/entitlements.plist \
+            --sign "Developer ID Application" \
+            build/ansible-interactive-darwin-arm64
+
+      - name: Verify code signature
+        if: runner.os == 'macOS'
+        run: |
+          BINARY=build/ansible-interactive-darwin-arm64
+          codesign --verify --strict --verbose=2 "$BINARY"
+          INFO="$(codesign --display --verbose=2 "$BINARY" 2>&1)"
+          echo "$INFO"
+          grep -q "Authority=Developer ID Application" <<< "$INFO"
+          grep -q "Timestamp=" <<< "$INFO"
+          grep -q "runtime" <<< "$INFO"
+          # Without the JIT entitlement the binary crashes on start under the hardened runtime
+          codesign --display --entitlements - --xml "$BINARY" 2>/dev/null | grep -q "com.apple.security.cs.allow-jit"
+
+      # A bare binary can't have its ticket stapled, so Gatekeeper looks it up
+      # online the first time a quarantined copy runs
+      - name: Notarize macOS binary
+        if: runner.os == 'macOS'
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+        run: |
+          KEY_PATH="$RUNNER_TEMP/AuthKey_${ASC_KEY_ID}.p8"
+          (umask 077 && printf '%s\n' "$ASC_PRIVATE_KEY" > "$KEY_PATH")
+
+          ditto -c -k --keepParent build/ansible-interactive-darwin-arm64 "$RUNNER_TEMP/notarize.zip"
+
+          # notarytool exits 0 even when the verdict is Invalid, so check the status
+          RESULT="$(xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" \
+            --key "$KEY_PATH" --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER_ID" \
+            --wait --output-format json)"
+          echo "$RESULT"
+          SUBMISSION_ID="$(jq -r .id <<< "$RESULT")"
+          STATUS="$(jq -r .status <<< "$RESULT")"
+          if [ "$STATUS" != "Accepted" ]; then
+            echo "::error::Notarization finished with status '$STATUS'"
+            xcrun notarytool log "$SUBMISSION_ID" \
+              --key "$KEY_PATH" --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER_ID"
+            exit 1
+          fi
+
+      - name: Smoke test
+        run: test "$(./build/ansible-interactive-${{ matrix.smoke }} --version)" = "${GITHUB_REF_NAME#v}"
+
+      - name: Remove temporary keychain and API key
+        if: always() && runner.os == 'macOS'
+        run: |
+          security delete-keychain "$RUNNER_TEMP/release.keychain-db" || true
+          security list-keychains -d user -s login.keychain-db
+          rm -f "$RUNNER_TEMP"/AuthKey_*.p8 "$RUNNER_TEMP/notarize.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ runner.os }}
+          path: build/
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: binaries-*
+          path: build/
+          merge-multiple: true
+      - run: sh scripts/package-release.sh
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prerelease=""
+          case "$GITHUB_REF_NAME" in *-*) prerelease="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" release/* --verify-tag --generate-notes $prerelease
